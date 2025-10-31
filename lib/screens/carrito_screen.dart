@@ -1,16 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'catalogo_screen.dart';
 
 class SimpleCart {
   SimpleCart._privateConstructor();
   static final SimpleCart instance = SimpleCart._privateConstructor();
 
-
   final Map<String, Map<String, dynamic>> _items = {};
 
+  final ValueNotifier<int> itemsCountNotifier = ValueNotifier<int>(0);
+
   List<Map<String, dynamic>> get items => _items.values.toList();
+
+  Map<String, dynamic>? getItemById(String id) {
+    return _items[id];
+  }
+
+  void _updateItemsCount() {
+    int total = 0;
+    for (var item in _items.values) {
+      total += item['cantidad'] as int;
+    }
+    itemsCountNotifier.value = total;
+  }
 
   void addItem(Map<String, dynamic> producto) {
     final id = producto['id'] ?? producto['nombre'];
@@ -23,17 +35,20 @@ class SimpleCart {
         'nombre': producto['nombre'],
         'precio': producto['precio'],
         'cantidad': 1,
-        'stock':producto['stock'],
+        'stock': producto['stock'],
         'imagen': imagen,
       };
     }
+    _updateItemsCount();
   }
+
   void increment(String id) {
     if (_items.containsKey(id)) {
       final item = _items[id]!;
       final stock = item['stock'] ?? 99999;
       if (item['cantidad'] < stock) {
         item['cantidad']++;
+        _updateItemsCount();
       }
     }
   }
@@ -45,14 +60,18 @@ class SimpleCart {
       } else {
         _items.remove(id);
       }
+      _updateItemsCount();
     }
   }
+
   void removeItem(String id) {
     _items.remove(id);
+    _updateItemsCount();
   }
 
   void clear() {
     _items.clear();
+    _updateItemsCount();
   }
 
   double get total {
@@ -64,8 +83,22 @@ class SimpleCart {
   }
 }
 
+String convertirEnlaceDriveADirecto(String url) {
+  if (url.contains('drive.google.com')) {
+    final regex = RegExp(r'/d/([a-zA-Z0-9_-]+)');
+    final match = regex.firstMatch(url);
+    if (match != null) {
+      final id = match.group(1);
+      return 'https://drive.google.com/uc?export=view&id=$id';
+    }
+  }
+  return url;
+}
+
 class CarritoScreen extends StatefulWidget {
-  const CarritoScreen({super.key});
+  final void Function(int) onCartChanged;
+  const CarritoScreen({super.key, required this.onCartChanged});
+
   @override
   State<CarritoScreen> createState() => _CarritoScreenState();
 }
@@ -73,15 +106,51 @@ class CarritoScreen extends StatefulWidget {
 class _CarritoScreenState extends State<CarritoScreen> {
   bool _procesando = false;
 
+  void _updateCartCounter() {
+    final count = SimpleCart.instance.items.fold<int>(
+        0, (prev, item) => prev + (item['cantidad'] as int));
+    widget.onCartChanged(count);
+  }
+
+  void _incrementItem(String id) {
+    setState(() {
+      SimpleCart.instance.increment(id);
+    });
+    _updateCartCounter();
+  }
+
+  void _decrementItem(String id) {
+    setState(() {
+      SimpleCart.instance.decrement(id);
+    });
+    _updateCartCounter();
+  }
+
+  void _removeItem(String id) {
+    setState(() {
+      SimpleCart.instance.removeItem(id);
+    });
+    _updateCartCounter();
+  }
+
+  void _clearCart() {
+    setState(() {
+      SimpleCart.instance.clear();
+    });
+    widget.onCartChanged(0);
+  }
+
   Future<void> _finalizarCompra() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Debes iniciar sesión para comprar')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Debes iniciar sesión para comprar')));
       return;
     }
     final items = SimpleCart.instance.items;
     if (items.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Carrito vacío')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Carrito vacío')));
       return;
     }
 
@@ -90,7 +159,8 @@ class _CarritoScreenState extends State<CarritoScreen> {
       final batch = FirebaseFirestore.instance.batch();
 
       for (var item in items) {
-        final docRef = FirebaseFirestore.instance.collection('productos').doc(item['id']);
+        final docRef =
+            FirebaseFirestore.instance.collection('productos').doc(item['id']);
         final docSnap = await docRef.get();
 
         if (!docSnap.exists) {
@@ -110,11 +180,13 @@ class _CarritoScreenState extends State<CarritoScreen> {
       final venta = {
         'email': user.email,
         'fecha': FieldValue.serverTimestamp(),
-        'productos': items.map((it) => {
-              'cantidad': it['cantidad'],
-              'nombre': it['nombre'],
-              'precio': it['precio'],
-            }).toList(),
+        'productos': items
+            .map((it) => {
+                  'cantidad': it['cantidad'],
+                  'nombre': it['nombre'],
+                  'precio': it['precio'],
+                })
+            .toList(),
         'total': SimpleCart.instance.total,
         'uid': user.uid,
       };
@@ -122,19 +194,21 @@ class _CarritoScreenState extends State<CarritoScreen> {
       final ventasRef = FirebaseFirestore.instance.collection('ventas');
       batch.set(ventasRef.doc(), venta);
 
-
       await batch.commit();
 
       SimpleCart.instance.clear();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Compra realizada con éxito')));
+      widget.onCartChanged(0);
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Compra realizada con éxito')));
       setState(() {});
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al procesar compra: $e')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Error al procesar compra: $e')));
     } finally {
       setState(() => _procesando = false);
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -152,61 +226,55 @@ class _CarritoScreenState extends State<CarritoScreen> {
                     itemCount: items.length,
                     itemBuilder: (context, index) {
                       final it = items[index];
+                      final item = SimpleCart.instance.getItemById(it['id']);
+                      if (item == null) return Container(); // seguridad
+
                       return Card(
                         margin: const EdgeInsets.symmetric(vertical: 6),
                         child: ListTile(
-                          leading: it['imagen'] != null && it['imagen'].isNotEmpty
+                          leading: item['imagen'] != null && item['imagen'].isNotEmpty
                               ? ClipRRect(
                                   borderRadius: BorderRadius.circular(8),
                                   child: Image.network(
-                                    it['imagen'],
+                                    item['imagen'],
                                     width: 50,
                                     height: 50,
                                     fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) => const Icon(Icons.broken_image, size: 40),
+                                    errorBuilder: (context, error, stackTrace) =>
+                                        const Icon(Icons.broken_image, size: 40),
                                   ),
                                 )
                               : const Icon(Icons.shopping_bag),
-                          title: Text(it['nombre']),
+                          title: Text(item['nombre']),
                           subtitle: Row(
                             children: [
                               IconButton(
                                 icon: const Icon(Icons.remove_circle_outline),
-                                onPressed: () {
-                                  setState(() {
-                                    SimpleCart.instance.decrement(it['id']);
-                                  });
-                                },
+                                onPressed: () => _decrementItem(it['id']),
                               ),
-                              Text('${it['cantidad']}'),
+                              Text('${item['cantidad']}'),
                               IconButton(
                                 icon: const Icon(Icons.add_circle_outline),
                                 onPressed: () {
-                                  final item = SimpleCart.instance._items[it['id']]!;
                                   if (item['cantidad'] >= item['stock']) {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
                                         content: Text('Stock máximo alcanzado para ${item['nombre']}'),
-                                        duration: Duration(milliseconds: 500),),
+                                        duration: const Duration(milliseconds: 500),
+                                      ),
                                     );
                                     return;
                                   }
-                                  setState(() {
-                                    SimpleCart.instance.increment(it['id']);
-                                  });
-},
+                                  _incrementItem(it['id']);
+                                },
                               ),
                               const SizedBox(width: 10),
-                              Text('S/ ${(it['precio'] * it['cantidad']).toStringAsFixed(2)}'),
+                              Text('S/ ${(item['precio'] * item['cantidad']).toStringAsFixed(2)}'),
                             ],
                           ),
                           trailing: IconButton(
                             icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () {
-                              setState(() {
-                                SimpleCart.instance.removeItem(it['id']);
-                              });
-                            },
+                            onPressed: () => _removeItem(it['id']),
                           ),
                         ),
                       );
@@ -214,29 +282,30 @@ class _CarritoScreenState extends State<CarritoScreen> {
                   ),
           ),
           const SizedBox(height: 8),
-          Text('Total: S/ ${SimpleCart.instance.total.toStringAsFixed(2)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          Text('Total: S/ ${SimpleCart.instance.total.toStringAsFixed(2)}',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 10),
-          _procesando ? const CircularProgressIndicator() : Row(
-            children: [
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: SimpleCart.instance.items.isEmpty ? null : _finalizarCompra,
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                  child: const Text('Finalizar compra'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              ElevatedButton(
-                onPressed: () {
-                  setState(() {
-                    SimpleCart.instance.clear();
-                  });
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.grey),
-                child: const Text('Vaciar'),
-              ),
-            ],
-          )
+          _procesando
+              ? const CircularProgressIndicator()
+              : Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: SimpleCart.instance.items.isEmpty ? null : _finalizarCompra,
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color.fromARGB(255, 204, 170, 79)),
+                        child: const Text('Finalizar compra'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    ElevatedButton(
+                      onPressed: SimpleCart.instance.items.isEmpty ? null : _clearCart,
+                      style:
+                          ElevatedButton.styleFrom(backgroundColor: const Color.fromARGB(255, 220, 66, 66)),
+                      child: const Text('Vaciar'),
+                    ),
+                  ],
+                )
         ],
       ),
     );

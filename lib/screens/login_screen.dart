@@ -87,8 +87,8 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Delicia - Login / Registro'),
-        backgroundColor: Colors.green.shade700,
+        title: const Text('BIMBU - Login / Registro'),
+        backgroundColor: const Color.fromARGB(255, 234, 155, 51),
         centerTitle: true,
       ),
       body: SingleChildScrollView(
@@ -134,10 +134,10 @@ class _LoginScreenState extends State<LoginScreen> {
               onPressed: _registrando ? _register : _login,
               icon: Icon(_registrando ? Icons.app_registration : Icons.login),
               label: Text(_registrando ? 'Registrarme' : 'Iniciar sesión'),
-              style: ElevatedButton.styleFrom(backgroundColor: _registrando ? Colors.blue : Colors.green),
+              style: ElevatedButton.styleFrom(backgroundColor: _registrando ? const Color.fromARGB(255, 240, 129, 19) : const Color.fromARGB(255, 255, 189, 66)),
             ),
             const SizedBox(height: 16),
-            const Text('Delicia - Panadería', style: TextStyle(fontSize: 12, color: Colors.grey)),
+            const Text('BIMBU - Panadería', style: TextStyle(fontSize: 12, color: Colors.grey)),
           ],
         ),
       ),

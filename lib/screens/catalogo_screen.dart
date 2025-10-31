@@ -2,204 +2,269 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'carrito_screen.dart';
 
-String convertirEnlaceDriveADirecto(String enlaceDrive) {
-  final regExp1 = RegExp(r'/d/([a-zA-Z0-9_-]+)');
-  final match1 = regExp1.firstMatch(enlaceDrive);
-
-  final regExp2 = RegExp(r'id=([a-zA-Z0-9_-]+)');
-  final match2 = regExp2.firstMatch(enlaceDrive);
-
-  String? id;
-  if (match1 != null) {
-    id = match1.group(1);
-  } else if (match2 != null) {
-    id = match2.group(1);
-  }
-
-  if (id != null) {
-    return 'https://drive.google.com/uc?export=view&id=$id';
-  } else {
-    return enlaceDrive;
-  }
-}
-
 class CatalogoScreen extends StatefulWidget {
-  const CatalogoScreen({super.key});
+  final void Function(int) onCartChanged;
+  const CatalogoScreen({super.key, required this.onCartChanged});
 
   @override
-  _CatalogoScreenState createState() => _CatalogoScreenState();
+  State<CatalogoScreen> createState() => _CatalogoScreenState();
 }
 
 class _CatalogoScreenState extends State<CatalogoScreen> {
-  // Controlador para el texto de búsqueda
-  TextEditingController _searchController = TextEditingController();
-  String _searchQuery = '';
-  void _onSearchChanged() {
-    setState(() {
-      _searchQuery = _searchController.text.toLowerCase();
-    });
-  }
+  final Query productosRef =
+      FirebaseFirestore.instance.collection('productos').orderBy('nombre');
 
-  void _agregarAlCarrito(BuildContext context, Map<String, dynamic> producto) {
-    if (producto['stock'] == null || producto['stock'] <= 0) {
-      ScaffoldMessenger.of(context)
-        ..removeCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(
-            content: Text('No hay stock disponible para este producto'),
-            duration: Duration(seconds: 1),
-          ),
-        );
+  String _busqueda = '';
+
+  void _agregarAlCarrito(Map<String, dynamic> producto) {
+    final stock = producto['stock'] ?? 0;
+    if (stock <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No hay stock disponible para este producto')),
+      );
       return;
     }
+
     SimpleCart.instance.addItem(producto);
-    ScaffoldMessenger.of(context)
-      ..removeCurrentSnackBar()
-      ..showSnackBar(
-        const SnackBar(
-          content: Text('Producto agregado al carrito'),
-          duration: Duration(seconds: 1),
-        ),
-      );
+
+    widget.onCartChanged(
+      SimpleCart.instance.items.fold<int>(
+          0, (prev, item) => prev + (item['cantidad'] as int)),
+    );
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${producto['nombre']} añadido al carrito'),
+        duration: const Duration(milliseconds: 900),
+      ),
+    );
+
+    setState(() {});
   }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Catálogo de Productos'),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(56),
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
+        backgroundColor: const Color.fromARGB(255, 245, 153, 96),
+        centerTitle: false,
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(10),
             child: TextField(
-              controller: _searchController,
-              onChanged: (_) => _onSearchChanged(),
+              onChanged: (valor) {
+                setState(() {
+                  _busqueda = valor.toLowerCase();
+                });
+              },
               decoration: InputDecoration(
-                hintText: 'Buscar productos...',
+                hintText: 'Buscar producto...',
                 prefixIcon: const Icon(Icons.search),
+                filled: true,
+                fillColor: Colors.white,
+                contentPadding:
+                    const EdgeInsets.symmetric(vertical: 0, horizontal: 15),
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(30),
                 ),
               ),
             ),
           ),
-        ),
-      ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('productos')
-            .orderBy('nombre')
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final docs = snapshot.data!.docs;
-          if (docs.isEmpty) {
-            return const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('No hay productos disponibles.'),
-            );
-          }
-          final filteredDocs = docs.where((p) {
-            final producto = p.data() as Map<String, dynamic>;
-            final nombre = producto['nombre'].toLowerCase();
-            final descripcion = producto['descripcion']?.toLowerCase() ?? '';
-            return nombre.contains(_searchQuery) || descripcion.contains(_searchQuery);
-          }).toList();
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: productosRef.snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return const Center(child: Text('Error al cargar los productos.'));
+                }
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-          if (filteredDocs.isEmpty) {
-            return const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('No se encontraron productos con esa búsqueda.'),
-            );
-          }
+                final productos = snapshot.data!.docs.where((doc) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  final nombre = (data['nombre'] ?? '').toString().toLowerCase();
+                  final descripcion =
+                      (data['descripcion'] ?? '').toString().toLowerCase();
+                  return nombre.contains(_busqueda) ||
+                      descripcion.contains(_busqueda);
+                }).toList();
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(12),
-            itemCount: filteredDocs.length,
-            itemBuilder: (context, index) {
-              final p = filteredDocs[index];
-              final producto = {
-                'id': p.id,
-                'nombre': p['nombre'],
-                'descripcion': p['descripcion'],
-                'precio': (p['precio'] is int)
-                    ? (p['precio'] as int).toDouble()
-                    : (p['precio'] as num).toDouble(),
-                'imagen': p['imagen'] ?? '',
-                'stock': p['stock'] ?? 0,
-              };
+                if (productos.isEmpty) {
+                  return const Center(child: Text('No se encontraron productos.'));
+                }
 
-              final urlImagen = convertirEnlaceDriveADirecto(producto['imagen']);
-              return Card(
-                elevation: 2,
-                margin: const EdgeInsets.symmetric(vertical: 6),
-                child: Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      urlImagen.isNotEmpty
-                          ? ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
+                return GridView.builder(
+                  padding: const EdgeInsets.all(12),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 10,
+                    mainAxisSpacing: 10,
+                    childAspectRatio: 0.70,
+                  ),
+                  itemCount: productos.length,
+                  itemBuilder: (context, index) {
+                    final doc = productos[index];
+                    final data = doc.data() as Map<String, dynamic>;
+                    final imagen = convertirEnlaceDriveADirecto(data['imagen'] ?? '');
+                    final descripcion = (data['descripcion'] ?? '').toString();
+                    final stock = (data['stock'] is int)
+                        ? data['stock'] as int
+                        : int.tryParse((data['stock'] ?? '0').toString()) ?? 0;
+
+                    // Validar cantidad
+                    int cantidadValida = 0;
+                    final cantidadField = data['cantidad'];
+                    if (cantidadField != null) {
+                      if (cantidadField is int) {
+                        cantidadValida = cantidadField;
+                      } else if (cantidadField is double) {
+                        cantidadValida = cantidadField.toInt();
+                      } else if (cantidadField is String) {
+                        cantidadValida = int.tryParse(cantidadField) ?? 0;
+                      }
+                    }
+
+                    Color stockColor;
+                    if (stock <= 0) {
+                      stockColor = Colors.red;
+                    } else if (stock < 10) {
+                      stockColor = Colors.orange;
+                    } else {
+                      stockColor = Colors.green;
+                    }
+
+                    return Card(
+                      elevation: 4,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(
+                            child: ClipRRect(
+                              borderRadius:
+                                  const BorderRadius.vertical(top: Radius.circular(12)),
                               child: Image.network(
-                                urlImagen,
-                                width: double.infinity,
-                                height: 180,
+                                imagen,
                                 fit: BoxFit.cover,
                                 errorBuilder: (context, error, stackTrace) =>
-                                    const Icon(Icons.broken_image, size: 40),
+                                    const Icon(Icons.broken_image, size: 60),
                               ),
-                            )
-                          : const Icon(Icons.bakery_dining, size: 40),
-                      const SizedBox(height: 12),
-                      Text(
-                        producto['nombre'],
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(producto['descripcion'] ?? '', maxLines: 2, overflow: TextOverflow.ellipsis),
-                      const SizedBox(height: 8),
-                      Text(
-                        'S/ ${producto['precio'].toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Stock disponible: ${producto['stock']}',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: producto['stock'] == 0
-                              ? Colors.red
-                              : (producto['stock'] < 10 ? Colors.orange : Colors.green),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      ElevatedButton(
-                        onPressed: () => _agregarAlCarrito(context, producto),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
+                            ),
                           ),
-                        ),
-                        child: const Text('Agregar'),
+                          Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  data['nombre'] ?? '',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 15,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  descripcion,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.black54,
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 6),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'S/ ${data['precio'] ?? 0.0}',
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    Text(
+                                      'Cant: $cantidadValida',
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    Text(
+                                      'Stock: $stock',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: stockColor,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton(
+                                    onPressed: stock > 0
+                                        ? () => _agregarAlCarrito({
+                                              'id': doc.id,
+                                              'nombre': data['nombre'],
+                                              'precio': data['precio'],
+                                              'cantidad': cantidadValida,
+                                              'stock': stock,
+                                              'imagen': data['imagen'],
+                                            })
+                                        : null,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: stock > 0
+                                          ? const Color.fromARGB(255, 202, 164, 74)
+                                          : Colors.grey,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 8),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      stock > 0 ? 'Agregar' : 'Sin stock',
+                                      style: const TextStyle(fontSize: 13),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          );
-        },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
+}
+
+// Convierte enlaces de Google Drive a formato directo
+String convertirEnlaceDriveADirecto(String url) {
+  if (url.contains('drive.google.com')) {
+    final regex = RegExp(r'/d/([a-zA-Z0-9_-]+)');
+    final match = regex.firstMatch(url);
+    if (match != null) {
+      final id = match.group(1);
+      return 'https://drive.google.com/uc?export=view&id=$id';
+    }
+  }
+  return url;
 }

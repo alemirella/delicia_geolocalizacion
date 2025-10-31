@@ -136,7 +136,7 @@ class _ProduccionScreenState extends State<ProduccionScreen> {
             onPressed: _guardarProduccion,
             label: const Text('Registrar Producción'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green.shade700,
+              backgroundColor: const Color.fromARGB(255, 231, 167, 71),
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               textStyle: const TextStyle(fontSize: 16),
             ),

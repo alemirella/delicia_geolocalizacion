@@ -7,27 +7,48 @@ import 'screens/login_screen.dart';
 import 'screens/catalogo_screen.dart';
 import 'screens/carrito_screen.dart';
 import 'screens/perfil_screen.dart';
-import 'screens/CRUD_screen.dart';
-import 'screens/produccion_screen.dart';
+//import 'screens/CRUD_screen.dart';
+//import 'screens/produccion_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
-  runApp(const DeliciaApp());
+  runApp(const BimbuApp());
 }
 
-class DeliciaApp extends StatelessWidget {
-  const DeliciaApp({super.key});
+class BimbuApp extends StatelessWidget {
+  const BimbuApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Delicia',
+      title: 'BIMBU - PANADERÍA',
       theme: ThemeData(
-        primarySwatch: Colors.green,
+        primaryColor: const Color(0xFFFF8C42),
+        scaffoldBackgroundColor: const Color(0xFFFFF3E0),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFFFF8C42),
+          foregroundColor: Colors.white,
+          titleTextStyle: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1.1,
+          ),
+          centerTitle: true,
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFFFF8C42),
+            foregroundColor: Colors.white,
+            textStyle: const TextStyle(fontWeight: FontWeight.bold),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(12)),
+            ),
+          ),
+        ),
       ),
-      home: const AuthWrapper(),
       debugShowCheckedModeBanner: false,
+      home: const AuthWrapper(),
     );
   }
 }
@@ -45,11 +66,11 @@ class AuthWrapper extends StatelessWidget {
             body: Center(child: CircularProgressIndicator()),
           );
         }
-        final user = snapshot.data;
-        if (user == null) {
-          return const LoginScreen();
-        } else {
+
+        if (snapshot.hasData) {
           return const HomeScreen();
+        } else {
+          return const LoginScreen();
         }
       },
     );
@@ -68,13 +89,16 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isAdmin = false;
   bool _loading = true;
 
+  // ValueNotifier para el contador de productos en el carrito
+  final ValueNotifier<int> cartCountNotifier = ValueNotifier<int>(0);
+
   @override
   void initState() {
     super.initState();
-    _cargarRolUsuario();
+    _verificarRolUsuario();
   }
 
-  Future<void> _cargarRolUsuario() async {
+  Future<void> _verificarRolUsuario() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
@@ -83,23 +107,19 @@ class _HomeScreenState extends State<HomeScreen> {
         .doc(user.uid)
         .get();
 
-    if (doc.exists && doc.data()?['admin'] == true) {
-      setState(() {
-        _isAdmin = true;
-        _loading = false;
-      });
-    } else {
-      setState(() {
-        _isAdmin = false;
-        _loading = false;
-      });
-    }
+    setState(() {
+      _isAdmin = doc.exists && doc.data()?['admin'] == true;
+      _loading = false;
+    });
   }
 
   void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
+    setState(() => _selectedIndex = index);
+  }
+
+  // Método público para actualizar el contador (desde CatalogoScreen)
+  void updateCartCount(int count) {
+    cartCountNotifier.value = count;
   }
 
   @override
@@ -110,51 +130,132 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    // --- Páginas disponibles según rol ---
     final List<Widget> pages = _isAdmin
-        ? const [CatalogoScreen(), CarritoScreen(), CRUDScreen(),ProduccionScreen(),PerfilScreen()]
-        : const [CatalogoScreen(), CarritoScreen(), PerfilScreen()];
+        ? [
+            CatalogoScreen(onCartChanged: updateCartCount),
+            CarritoScreen(onCartChanged: updateCartCount),
+            //CRUDScreen(),
+            //ProduccionScreen(),
+            PerfilScreen(),
+          ]
+        : [
+            CatalogoScreen(onCartChanged: updateCartCount),
+            CarritoScreen(onCartChanged: updateCartCount),
+            PerfilScreen(),
+          ];
 
     final List<BottomNavigationBarItem> navItems = _isAdmin
-        ? const [
-            BottomNavigationBarItem(icon: Icon(Icons.storefront), label: 'Catálogo'),
-            BottomNavigationBarItem(icon: Icon(Icons.shopping_cart), label: 'Carrito'),
-            BottomNavigationBarItem(icon: Icon(Icons.inventory), label: 'CRUD'),
-            BottomNavigationBarItem(icon: Icon(Icons.production_quantity_limits), label: 'Producción'),
-            BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Perfil'),
+        ? [
+            const BottomNavigationBarItem(
+                icon: Icon(Icons.storefront), label: 'Catálogo'),
+            BottomNavigationBarItem(
+              icon: ValueListenableBuilder<int>(
+                valueListenable: cartCountNotifier,
+                builder: (context, count, child) {
+                  return Stack(
+                    children: [
+                      const Icon(Icons.shopping_cart),
+                      if (count > 0)
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          child: Container(
+                            padding: const EdgeInsets.all(1),
+                            decoration: BoxDecoration(
+                              color: Colors.red,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            constraints: const BoxConstraints(
+                              minWidth: 16,
+                              minHeight: 16,
+                            ),
+                            child: Text(
+                              '$count',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        )
+                    ],
+                  );
+                },
+              ),
+              label: 'Carrito',
+            ),
+            //const BottomNavigationBarItem(icon: Icon(Icons.inventory), label: 'CRUD'),
+            //const BottomNavigationBarItem(icon: Icon(Icons.production_quantity_limits), label: 'Producción'),
+            const BottomNavigationBarItem(
+                icon: Icon(Icons.person), label: 'Perfil'),
           ]
-        : const [
-            BottomNavigationBarItem(icon: Icon(Icons.storefront), label: 'Catálogo'),
-            BottomNavigationBarItem(icon: Icon(Icons.shopping_cart), label: 'Carrito'),
-            BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Perfil'),
+        : [
+            const BottomNavigationBarItem(
+                icon: Icon(Icons.storefront), label: 'Catálogo'),
+            BottomNavigationBarItem(
+              icon: ValueListenableBuilder<int>(
+                valueListenable: cartCountNotifier,
+                builder: (context, count, child) {
+                  return Stack(
+                    children: [
+                      const Icon(Icons.shopping_cart),
+                      if (count > 0)
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          child: Container(
+                            padding: const EdgeInsets.all(1),
+                            decoration: BoxDecoration(
+                              color: Colors.red,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            constraints: const BoxConstraints(
+                              minWidth: 16,
+                              minHeight: 16,
+                            ),
+                            child: Text(
+                              '$count',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        )
+                    ],
+                  );
+                },
+              ),
+              label: 'Carrito',
+            ),
+            const BottomNavigationBarItem(
+                icon: Icon(Icons.person), label: 'Perfil'),
           ];
-          
-    if (!_isAdmin && _selectedIndex > pages.length - 1) {
-      _selectedIndex = 0;
-    }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Delicia - Panadería'),
-        backgroundColor: Colors.green.shade700,
-        centerTitle: true,
+        title: const Text('BIMBU - PANADERÍA'),
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
               await FirebaseAuth.instance.signOut();
             },
-          )
+          ),
         ],
       ),
       body: SafeArea(child: pages[_selectedIndex]),
       bottomNavigationBar: BottomNavigationBar(
-        items: navItems,
         currentIndex: _selectedIndex,
-        selectedItemColor: Colors.green.shade800,
-        unselectedItemColor: Colors.grey,
+        selectedItemColor: const Color(0xFFFF8C42),
+        unselectedItemColor: Colors.brown.shade400,
         onTap: _onItemTapped,
         type: BottomNavigationBarType.fixed,
+        items: navItems,
       ),
     );
   }
