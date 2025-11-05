@@ -84,8 +84,15 @@ class _CatalogoScreenState extends State<CatalogoScreen> {
                   return const Center(child: CircularProgressIndicator());
                 }
 
+                // 🔥 FILTRAR: Excluir productos en oferta
                 final productos = snapshot.data!.docs.where((doc) {
                   final data = doc.data() as Map<String, dynamic>;
+                  
+                  // ⚠️ NUEVO: Si está en oferta, NO mostrarlo en catálogo
+                  final enOferta = data['en_oferta'] ?? false;
+                  if (enOferta == true) return false;
+                  
+                  // Filtro de búsqueda normal
                   final nombre = (data['nombre'] ?? '').toString().toLowerCase();
                   final descripcion =
                       (data['descripcion'] ?? '').toString().toLowerCase();
